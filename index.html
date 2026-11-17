@@ -26,6 +26,16 @@
 <div id="auth-box" style="display:none"><label>Correo de administradora</label><input id="email" type="email" autocomplete="username" placeholder="tu@email.com"><label>Contraseña</label><input id="password" type="password" autocomplete="current-password"><div class="admin-actions"><button class="primary" id="login">Entrar</button></div><p class="small">El acceso se protege con Firebase Authentication. La cuenta debe crearse en Firebase antes de ingresar.</p></div>
 <div id="editor" style="display:none"><h3 id="form-title">Agregar joya</h3><form id="product-form"><input type="hidden" id="edit-id"><label>Nombre de la joya</label><input id="name" required maxlength="80" placeholder="Ej. Anillo Siena"><label>Categoría</label><select id="category"><option>Aros</option><option>Anillos</option><option>Collares</option><option>Pulseras</option><option>Conjuntos</option><option>Otros</option></select><label>Precio (guaraníes)</label><input id="price" type="number" min="0" step="1000" required placeholder="35000"><label>Fotografía desde tu iPhone</label><input id="photo" type="file" accept="image/*"><p class="small">La foto se reduce automáticamente para ahorrar espacio. Recomendado: una foto por producto.</p><label><input id="soldout" type="checkbox" style="width:auto"> Producto agotado</label><div class="admin-actions"><button class="primary" type="submit" id="save">Guardar producto</button><button type="button" id="reset">Nuevo producto</button></div></form><h3>Mis productos</h3><div id="admin-items"></div><div class="admin-actions"><button id="logout" style="display:none">Cerrar sesión</button><button id="export">Exportar copia JSON</button><label style="margin:0"><span style="display:inline-block;border:1px solid #b99c8c;padding:11px 13px;border-radius:7px;cursor:pointer">Importar copia JSON</span><input type="file" id="import" accept="application/json,.json" style="display:none"></label></div></div>
 </div></div>
+<script>
+// Respaldo para abrir el panel si el navegador no puede cargar el módulo.
+document.addEventListener('DOMContentLoaded', function(){
+  var open=document.getElementById('admin-open'), close=document.getElementById('admin-close'), overlay=document.getElementById('admin-overlay');
+  if(open && close && overlay){
+    open.addEventListener('click',function(){overlay.classList.add('show');document.body.style.overflow='hidden';});
+    close.addEventListener('click',function(){overlay.classList.remove('show');document.body.style.overflow='';});
+  }
+});
+</script>
 <script type="module">
 // CONFIGURACIÓN: pegá aquí los datos públicos de tu proyecto Firebase.
 // Mientras esté vacío, funciona como DEMO LOCAL: los cambios solo se ven en este navegador.
@@ -58,11 +68,26 @@ async function compress(file){return new Promise((resolve,reject)=>{const img=ne
 async function saveProduct(p){if(cloud){await fire.setDoc(fire.doc(db,'productos',p.id),p)}else{let idx=products.findIndex(x=>x.id===p.id);if(idx<0)products.unshift(p);else products[idx]=p;localSave();render()}}
 async function removeProduct(id){if(cloud){await fire.deleteDoc(fire.doc(db,'productos',id))}else{products=products.filter(p=>p.id!==id);localSave();render()}}
 $('product-form').onsubmit=async e=>{e.preventDefault();const button=$('save');button.disabled=true;button.textContent='Guardando...';try{let old=products.find(p=>p.id===$('edit-id').value);let image=old?.image||'';if($('photo').files[0])image=await compress($('photo').files[0]);if(!image)throw Error('Elegí una foto para la joya.');let p={id:old?.id||('p-'+Date.now()+'-'+Math.random().toString(36).slice(2,7)),name:$('name').value.trim(),category:$('category').value,price:Number($('price').value),image,soldout:$('soldout').checked};if(!p.name||!Number.isFinite(p.price)||p.price<0)throw Error('Revisá nombre y precio');await saveProduct(p);reset();alert('Producto guardado 🤎')}catch(err){alert('No se pudo guardar: '+err.message)}finally{button.disabled=false;button.textContent='Guardar producto'}};
-$('reset').onclick=reset;$('admin-open').onclick=()=>{$('admin-overlay').classList.add('show')};$('admin-close').onclick=()=>$('admin-overlay').classList.remove('show');
+$('reset').onclick=reset;
+// Abrir el panel inmediatamente, incluso si Firebase tarda o falla.
+$('admin-open').addEventListener('click',()=>{
+  $('admin-overlay').classList.add('show');
+  document.body.style.overflow='hidden';
+});
+$('admin-close').addEventListener('click',()=>{
+  $('admin-overlay').classList.remove('show');
+  document.body.style.overflow='';
+});
+$('admin-overlay').addEventListener('click',e=>{
+  if(e.target===$('admin-overlay'))$('admin-close').click();
+});
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&$('admin-overlay').classList.contains('show'))$('admin-close').click();
+});
 $('export').onclick=()=>{let blob=new Blob([JSON.stringify(products,null,2)],{type:'application/json'});let a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='melia-catalogo.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)};
 $('import').onchange=async e=>{if(cloud){alert('En modo online, agregá los productos desde el panel.');return}try{let arr=JSON.parse(await e.target.files[0].text());if(!Array.isArray(arr)||arr.some(p=>!p.id||!p.name||!p.category||typeof p.price!=='number'||typeof p.image!=='string'))throw Error('Formato incorrecto');if(!confirm('¿Reemplazar el catálogo local con esta copia?'))return;products=arr;localSave();render();alert('Catálogo importado')}catch(err){alert('No se pudo importar: '+err.message)}};
 $('instagram').href=INSTAGRAM_URL;for(const id of ['footer-wa','float-wa'])$(id).onclick=e=>{e.preventDefault();window.open(wa('¡Hola, MELÍA! 💛 Quiero consultar por sus joyas.'),'_blank','noopener,noreferrer')};
 if(!cloud){products=JSON.parse(localStorage.getItem('melia-products-v2')||'null')||demoProducts;$('status').textContent='MODO DE PRUEBA: los cambios se guardan solo en este iPhone/navegador. Para que tus clientas vean los cambios en la web publicada, hay que conectar Firebase y publicar la página.';$('editor').style.display='block';render()}
-else{try{const appMod=await import('https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js');const authMod=await import('https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js');fire=await import('https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js');const app=appMod.initializeApp(firebaseConfig);auth=authMod.getAuth(app);db=fire.getFirestore(app);$('auth-box').style.display='block';$('status').textContent='Conectando catálogo de MELÍA…';fire.onSnapshot(fire.collection(db,'productos'),snapshot=>{products=snapshot.docs.map(d=>({...d.data(),id:d.id}));render()},err=>{$('status').textContent='No se pudo leer el catálogo: '+err.message});authMod.onAuthStateChanged(auth,user=>{adminUser=user?.uid===ADMIN_UID?user:null;$('auth-box').style.display=user?'none':'block';$('editor').style.display=adminUser?'block':'none';$('logout').style.display=user?'inline-block':'none';$('status').textContent=adminUser?'Sesión privada iniciada: '+user.email:(user?'Esta cuenta no tiene permiso para administrar MELÍA.':'Iniciá sesión para editar el catálogo.');renderAdmin()});$('login').onclick=async()=>{try{await authMod.signInWithEmailAndPassword(auth,$('email').value,$('password').value)}catch(e){alert('No se pudo entrar: '+e.message)}};$('logout').onclick=()=>authMod.signOut(auth)}catch(e){$('status').textContent='No se pudo conectar Firebase: '+e.message}}
+else{(async()=>{try{const appMod=await import('https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js');const authMod=await import('https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js');fire=await import('https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js');const app=appMod.initializeApp(firebaseConfig);auth=authMod.getAuth(app);db=fire.getFirestore(app);$('auth-box').style.display='block';$('status').textContent='Conectando catálogo de MELÍA…';fire.onSnapshot(fire.collection(db,'productos'),snapshot=>{products=snapshot.docs.map(d=>({...d.data(),id:d.id}));render()},err=>{$('status').textContent='No se pudo leer el catálogo: '+err.message});authMod.onAuthStateChanged(auth,user=>{adminUser=user?.uid===ADMIN_UID?user:null;$('auth-box').style.display=user?'none':'block';$('editor').style.display=adminUser?'block':'none';$('logout').style.display=user?'inline-block':'none';$('status').textContent=adminUser?'Sesión privada iniciada: '+user.email:(user?'Esta cuenta no tiene permiso para administrar MELÍA.':'Iniciá sesión para editar el catálogo.');renderAdmin()});$('login').onclick=async()=>{try{await authMod.signInWithEmailAndPassword(auth,$('email').value,$('password').value)}catch(e){alert('No se pudo entrar: '+e.message)}};$('logout').onclick=()=>authMod.signOut(auth)}catch(e){$('status').textContent='No se pudo conectar Firebase: '+e.message;$('auth-box').style.display='block'}})();
 }
 </script></body></html>
